@@ -14,6 +14,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
+            var showMirror by remember { mutableStateOf(false) }
             var hasPermission by remember {
                 mutableStateOf(
                     ContextCompat.checkSelfPermission(
@@ -25,13 +26,19 @@ class MainActivity : ComponentActivity() {
 
             val launcher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission()
-            ) { granted -> hasPermission = granted }
-
-            LaunchedEffect(Unit) {
-                if (!hasPermission) launcher.launch(Manifest.permission.CAMERA)
+            ) { granted ->
+                hasPermission = granted
+                if (granted) showMirror = true
             }
 
-            if (hasPermission) {
+            if (!showMirror) {
+                AppSelectionScreen(
+                    onStartMirror = {
+                        if (hasPermission) showMirror = true
+                        else launcher.launch(Manifest.permission.CAMERA)
+                    }
+                )
+            } else if (hasPermission) {
                 MirrorTimerScreen()
             } else {
                 CameraPermissionScreen {
