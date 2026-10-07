@@ -3,6 +3,8 @@ package com.fiveminutemirror
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.content.Intent
+import androidx.core.content.ContextCompat as CoreContextCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -44,6 +46,10 @@ class MainActivity : ComponentActivity() {
                 SetupStep.USAGE_ACCESS -> UsageAccessScreen {
                     refreshUsageAccess++
                     if (hasUsageAccess(this)) {
+                        CoreContextCompat.startForegroundService(
+                            this,
+                            Intent(this, ProtectionMonitorService::class.java)
+                        )
                         if (cameraAllowed) step = SetupStep.MIRROR
                         else cameraLauncher.launch(Manifest.permission.CAMERA)
                     }
