@@ -2,7 +2,6 @@ package com.fiveminutemirror
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.Matrix
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
@@ -34,7 +33,10 @@ import kotlin.math.max
 private const val TOTAL_SECONDS = 5 * 60
 
 @Composable
-fun MirrorTimerScreen() {
+fun MirrorTimerScreen(
+    onUseApp: (() -> Unit)? = null,
+    onStop: (() -> Unit)? = null
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -102,11 +104,19 @@ fun MirrorTimerScreen() {
                         fontSize = 28.sp
                     )
                     Spacer(Modifier.height(20.dp))
-                    Button(onClick = {
-                        remainingSeconds = TOTAL_SECONDS
-                        completed = false
-                    }) {
-                        Text("다시 시작")
+                    if (onUseApp != null) {
+                        Button(onClick = onUseApp) { Text("사용하기") }
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedButton(onClick = { onStop?.invoke() }) {
+                            Text("그만두기", color = Color.White)
+                        }
+                    } else {
+                        Button(onClick = {
+                            remainingSeconds = TOTAL_SECONDS
+                            completed = false
+                        }) {
+                            Text("다시 시작")
+                        }
                     }
                 }
             }
