@@ -9,11 +9,14 @@ import kotlinx.coroutines.*
 class ProtectionMonitorService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private lateinit var monitor: ProtectionMonitor
-    private var lastProtected: String? = null
+    private lateinit var state: ProtectionStateStore
+    private var previousForeground: String? = null
+    private var lastPromptedPackage: String? = null
 
     override fun onCreate() {
         super.onCreate()
         monitor = ProtectionMonitor(this)
+        state = ProtectionStateStore(this)
         createChannels()
         startForeground(
             1001,
@@ -27,29 +30,47 @@ class ProtectionMonitorService : Service() {
 
         scope.launch {
             while (isActive) {
-                val detected = monitor.protectedForegroundApp()
-                if (detected != null && detected != lastProtected) {
-                    showMirrorPrompt(detected)
-                    lastProtected = detected
-                } else if (detected == null) {
-                    lastProtected = null
+                if (!state.enabled) {
+                    stopSelf()
+                    break
+                }
+
+                val current = ForegroundAppDetector(this@ProtectionMonitorService)
+                    .mostRecentForegroundPackage()
+
+                if (current != null && current != previousForeground) {
+                    val protected = current in ProtectedAppsStore(this@ProtectionMonitorService).load()
+
+                    if (state.allowedPackage != null && current != state.allowedPackage &&
+                        current != packageName && !isLikelySystemInterruption(current)) {
+                        state.clearAllowance()
+                    }
+
+                    if (protected && state.allowedPackage != current && lastPromptedPackage != current) {
+                        showMirrorPrompt(current)
+                        lastPromptedPackage = current
+                    }
+
+                    if (!protected) lastPromptedPackage = null
+                    previousForeground = current
                 }
                 delay(1000)
             }
         }
     }
 
+    private fun isLikelySystemInterruption(pkg: String): Boolean =
+        pkg == "com.android.systemui" ||
+            pkg.contains("incallui", ignoreCase = true) ||
+            pkg.contains("telecom", ignoreCase = true)
+
     private fun showMirrorPrompt(packageName: String) {
         val launch = Intent(this, MirrorGateActivity::class.java)
             .putExtra(MirrorGateActivity.EXTRA_TARGET_PACKAGE, packageName)
-
         val pending = PendingIntent.getActivity(
-            this,
-            packageName.hashCode(),
-            launch,
+            this, packageName.hashCode(), launch,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
         val label = runCatching {
             packageManager.getApplicationLabel(
                 packageManager.getApplicationInfo(packageName, 0)
@@ -71,20 +92,12 @@ class ProtectionMonitorService : Service() {
 
     private fun createChannels() {
         val manager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_MONITOR,
-                "보호 기능",
-                NotificationManager.IMPORTANCE_LOW
-            )
-        )
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_GATE,
-                "5분 거울 시작",
-                NotificationManager.IMPORTANCE_HIGH
-            )
-        )
+        manager.createNotificationChannel(NotificationChannel(
+            CHANNEL_MONITOR, "보호 기능", NotificationManager.IMPORTANCE_LOW
+        ))
+        manager.createNotificationChannel(NotificationChannel(
+            CHANNEL_GATE, "5분 거울 시작", NotificationManager.IMPORTANCE_HIGH
+        ))
     }
 
     override fun onDestroy() {
