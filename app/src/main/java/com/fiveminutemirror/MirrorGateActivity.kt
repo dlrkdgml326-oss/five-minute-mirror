@@ -40,6 +40,7 @@ class MirrorGateActivity : ComponentActivity() {
             if (cameraAllowed) {
                 MirrorTimerScreen(
                     onUseApp = {
+                        ProtectionStateStore(this).allowedPackage = target
                         packageManager.getLaunchIntentForPackage(target)?.let {
                             it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             startActivity(it)
