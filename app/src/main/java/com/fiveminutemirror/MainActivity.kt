@@ -10,12 +10,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
 
+private enum class SetupStep { APP_SELECTION, USAGE_ACCESS, MIRROR }
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            var showMirror by remember { mutableStateOf(false) }
-            var hasPermission by remember {
+            var step by remember { mutableStateOf(SetupStep.APP_SELECTION) }
+            var refreshUsageAccess by remember { mutableIntStateOf(0) }
+            val usageAllowed = remember(refreshUsageAccess) { hasUsageAccess(this) }
+
+            var cameraAllowed by remember {
                 mutableStateOf(
                     ContextCompat.checkSelfPermission(
                         this,
@@ -24,25 +29,34 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
-            val launcher = rememberLauncherForActivityResult(
+            val cameraLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.RequestPermission()
             ) { granted ->
-                hasPermission = granted
-                if (granted) showMirror = true
+                cameraAllowed = granted
+                if (granted) step = SetupStep.MIRROR
             }
 
-            if (!showMirror) {
-                AppSelectionScreen(
-                    onStartMirror = {
-                        if (hasPermission) showMirror = true
-                        else launcher.launch(Manifest.permission.CAMERA)
+            when (step) {
+                SetupStep.APP_SELECTION -> AppSelectionScreen {
+                    step = if (usageAllowed) SetupStep.MIRROR else SetupStep.USAGE_ACCESS
+                }
+
+                SetupStep.USAGE_ACCESS -> UsageAccessScreen {
+                    refreshUsageAccess++
+                    if (hasUsageAccess(this)) {
+                        if (cameraAllowed) step = SetupStep.MIRROR
+                        else cameraLauncher.launch(Manifest.permission.CAMERA)
                     }
-                )
-            } else if (hasPermission) {
-                MirrorTimerScreen()
-            } else {
-                CameraPermissionScreen {
-                    launcher.launch(Manifest.permission.CAMERA)
+                }
+
+                SetupStep.MIRROR -> {
+                    if (cameraAllowed) {
+                        MirrorTimerScreen()
+                    } else {
+                        CameraPermissionScreen {
+                            cameraLauncher.launch(Manifest.permission.CAMERA)
+                        }
+                    }
                 }
             }
         }
