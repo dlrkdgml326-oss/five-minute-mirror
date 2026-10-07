@@ -1,10 +1,10 @@
 package com.fiveminutemirror
 
 import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Bundle
 import android.content.Intent
-import androidx.core.content.ContextCompat as CoreContextCompat
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -12,22 +12,20 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
 
-private enum class SetupStep { APP_SELECTION, USAGE_ACCESS, MIRROR }
+private enum class Screen { HOME, APP_SELECTION, USAGE_ACCESS, MIRROR }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            var step by remember { mutableStateOf(SetupStep.APP_SELECTION) }
-            var refreshUsageAccess by remember { mutableIntStateOf(0) }
-            val usageAllowed = remember(refreshUsageAccess) { hasUsageAccess(this) }
-
+            val hasSelections = remember { ProtectedAppsStore(this).load().isNotEmpty() }
+            var screen by remember {
+                mutableStateOf(if (hasSelections) Screen.HOME else Screen.APP_SELECTION)
+            }
             var cameraAllowed by remember {
                 mutableStateOf(
-                    ContextCompat.checkSelfPermission(
-                        this,
-                        Manifest.permission.CAMERA
-                    ) == PackageManager.PERMISSION_GRANTED
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
+                        PackageManager.PERMISSION_GRANTED
                 )
             }
 
@@ -35,27 +33,57 @@ class MainActivity : ComponentActivity() {
                 ActivityResultContracts.RequestPermission()
             ) { granted ->
                 cameraAllowed = granted
-                if (granted) step = SetupStep.MIRROR
+                if (granted) screen = Screen.MIRROR
             }
 
-            when (step) {
-                SetupStep.APP_SELECTION -> AppSelectionScreen {
-                    step = if (usageAllowed) SetupStep.MIRROR else SetupStep.USAGE_ACCESS
-                }
+            val notificationLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission()
+            ) { }
 
-                SetupStep.USAGE_ACCESS -> UsageAccessScreen {
-                    refreshUsageAccess++
-                    if (hasUsageAccess(this)) {
-                        CoreContextCompat.startForegroundService(
+            fun ensureNotifications() {
+                if (Build.VERSION.SDK_INT >= 33 &&
+                    ContextCompat.checkSelfPermission(
+                        this, Manifest.permission.POST_NOTIFICATIONS
+                    ) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+
+            when (screen) {
+                Screen.HOME -> ProtectionHomeScreen(
+                    onEditApps = { screen = Screen.APP_SELECTION },
+                    onMirrorTest = {
+                        if (cameraAllowed) screen = Screen.MIRROR
+                        else cameraLauncher.launch(Manifest.permission.CAMERA)
+                    }
+                )
+
+                Screen.APP_SELECTION -> AppSelectionScreen {
+                    screen = if (hasUsageAccess(this)) {
+                        ensureNotifications()
+                        ProtectionStateStore(this).enabled = true
+                        ContextCompat.startForegroundService(
                             this,
                             Intent(this, ProtectionMonitorService::class.java)
                         )
-                        if (cameraAllowed) step = SetupStep.MIRROR
-                        else cameraLauncher.launch(Manifest.permission.CAMERA)
+                        Screen.HOME
+                    } else Screen.USAGE_ACCESS
+                }
+
+                Screen.USAGE_ACCESS -> UsageAccessScreen {
+                    if (hasUsageAccess(this)) {
+                        ensureNotifications()
+                        ProtectionStateStore(this).enabled = true
+                        ContextCompat.startForegroundService(
+                            this,
+                            Intent(this, ProtectionMonitorService::class.java)
+                        )
+                        screen = Screen.HOME
                     }
                 }
 
-                SetupStep.MIRROR -> {
+                Screen.MIRROR -> {
                     if (cameraAllowed) {
                         MirrorTimerScreen()
                     } else {
